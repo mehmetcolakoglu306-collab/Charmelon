@@ -2562,8 +2562,8 @@ class OrganizerApp:
         self.body = ft.AnimatedSwitcher(
             content=ft.Container(),
             transition=ft.AnimatedSwitcherTransition.FADE,
-            duration=260,
-            reverse_duration=180,
+            duration=110,
+            reverse_duration=90,
             switch_in_curve=ft.AnimationCurve.EASE_OUT_CUBIC,
             switch_out_curve=ft.AnimationCurve.EASE_IN_CUBIC,
             expand=True,
@@ -2611,11 +2611,6 @@ class OrganizerApp:
     def extra_week_count(self, offset=0):
         history = load_extra_history(self.page)
         return sum(sum_extra_for_day(history.get(d.strftime("%Y-%m-%d"))) for d in week_dates(offset))
-
-    def habits_today(self):
-        names = load_habit_list(self.page) or []
-        done = load_habit_completions(self.page).get(self.today(), [])
-        return names, done
 
     def toast(self, message):
         sb = ft.SnackBar(content=ft.Text(message))
@@ -2739,7 +2734,6 @@ class OrganizerApp:
         streak = compute_focus_streak(load_history(self.page))
         gym = self.gym_state()
         gym_done = sum(1 for g in gym if g["done"])
-        names, done = self.habits_today()
         weights = load_weight_history(self.page)
         last_weight = weights[sorted(weights.keys())[-1]] if weights else None
         stale = compute_last_done_per_workout(self.page)
@@ -2835,11 +2829,6 @@ class OrganizerApp:
             ),
             data_row(
                 theme,
-                self.t("habit_row"),
-                f"{len(done)}/{len(names)}" if names else "—",
-            ),
-            data_row(
-                theme,
                 self.t("active_streak"),
                 f"{active_streak} {self.t('days')}",
             ),
@@ -2852,67 +2841,6 @@ class OrganizerApp:
                 last=True,
             ),
         ]
-
-        habit_rows = []
-        completions = load_habit_completions(self.page)
-        for name in names:
-            is_done = name in done
-            habit_rows.append(
-                ft.Container(
-                    content=ft.Row(
-                        [
-                            ft.Icon(
-                                ft.Icons.CHECK_CIRCLE
-                                if is_done
-                                else ft.Icons.RADIO_BUTTON_UNCHECKED,
-                                size=19,
-                                color=theme["accent"] if is_done else theme["ink_45"],
-                            ),
-                            ft.Text(
-                                name,
-                                size=13.5,
-                                color=theme["ink"] if is_done else theme["ink_70"],
-                                expand=True,
-                            ),
-                            ft.Text(
-                                f"{compute_habit_streak(completions, name)} {self.t('days')} · "
-                                + self.t(
-                                    "habit_30",
-                                    n=compute_habit_completion_count(completions, name, 30),
-                                ),
-                                size=11,
-                                color=theme["ink_45"],
-                            ),
-                            ft.IconButton(
-                                ft.Icons.DELETE_OUTLINE,
-                                icon_size=16,
-                                icon_color=theme["ink_45"],
-                                on_click=lambda e, n=name: self.on_delete_habit(n),
-                            ),
-                        ],
-                        spacing=6,
-                    ),
-                    padding=ft.Padding.only(left=0, top=2, right=0, bottom=2),
-                    on_click=lambda e, n=name: self.on_toggle_habit(n),
-                    ink=True,
-                    border=ft.Border.only(bottom=ft.BorderSide(1, theme["line"])),
-                )
-            )
-        self.habit_field = ft.TextField(hint_text=self.t("new_habit"), dense=True, expand=True)
-        habit_rows.append(
-            ft.Container(
-                content=ft.Row(
-                    [
-                        self.habit_field,
-                        ft.IconButton(
-                            ft.Icons.ADD, icon_color=theme["accent"], on_click=self.on_add_habit
-                        ),
-                    ],
-                    spacing=6,
-                ),
-                padding=ft.Padding.symmetric(vertical=4, horizontal=0),
-            )
-        )
 
         content = [
             head,
@@ -2959,10 +2887,6 @@ class OrganizerApp:
             ]
         content += [
             ft.Container(height=16),
-            label_text(theme, self.t("habits"), theme["ink_45"]),
-            ft.Container(height=8),
-            panel(theme, habit_rows),
-            ft.Container(height=16),
             ft.Row(
                 [
                     primary_button(theme, self.t("focus_btn", n=25), lambda e: self.start_focus(25)),
@@ -2973,26 +2897,6 @@ class OrganizerApp:
             ft.Container(height=8),
         ]
         return ft.Column(content, spacing=0, scroll=ft.ScrollMode.AUTO, expand=True)
-
-    def on_toggle_habit(self, name):
-        toggle_habit_completion(self.page, self.today(), name)
-        self.refresh()
-        self.check_milestones()
-
-    def on_delete_habit(self, name):
-        names = [n for n in (load_habit_list(self.page) or []) if n != name]
-        save_habit_list(self.page, names)
-        self.refresh()
-
-    def on_add_habit(self, e):
-        name = (self.habit_field.value or "").strip()
-        if not name:
-            return
-        names = load_habit_list(self.page) or []
-        if name not in names:
-            names.append(name)
-            save_habit_list(self.page, names)
-        self.refresh()
 
     # ---------------- ODAK ------------------------------------
     def build_focus_screen(self):
@@ -3219,60 +3123,74 @@ class OrganizerApp:
         self.refresh()
 
     def spawn_timer(self):
-        if self.focus_thread and self.focus_thread.is_alive():
+        if getattr(self, "_timer_running_flag", False):
             return
 
         def run():
-            while self.focus_running and self.focus_remaining > 0:
-                time.sleep(1)
-                if not self.focus_running:
-                    return
-                if self.focus_started_at:
-                    self.focus_remaining = max(
-                        0,
-                        int(self.focus_minutes * 60 - (time.time() - self.focus_started_at)),
-                    )
-                else:
-                    self.focus_remaining -= 1
-                if self.tab == 1 and not self.settings_open and self.clock_text is not None:
+            self._timer_running_flag = True
+            try:
+                self._timer_loop()
+            finally:
+                self._timer_running_flag = False
+
+        # threading.Thread yerine page.run_thread kullanmak, arka plan
+        # thread'inin dogru "sayfa baglamina" (page context) baglanmasini
+        # sagliyor - aksi halde page.update() cagrilari istemciye
+        # yansimiyor ve kronometre ancak ekrana dokununca guncelleniyordu.
+        try:
+            self.page.run_thread(run)
+        except Exception:
+            self.focus_thread = threading.Thread(target=run, daemon=True)
+            self.focus_thread.start()
+
+    def _timer_loop(self):
+        while self.focus_running and self.focus_remaining > 0:
+            time.sleep(1)
+            if not self.focus_running:
+                return
+            if self.focus_started_at:
+                self.focus_remaining = max(
+                    0,
+                    int(self.focus_minutes * 60 - (time.time() - self.focus_started_at)),
+                )
+            else:
+                self.focus_remaining -= 1
+            if self.tab == 1 and not self.settings_open and self.clock_text is not None:
+                try:
+                    total = self.focus_minutes * 60
+                    self.clock_text.value = fmt_clock(self.focus_remaining)
+                    if self.focus_ring is not None:
+                        self.focus_ring.value = 1 - (
+                            self.focus_remaining / total if total else 0
+                        )
+                    # Tek tek kontrolleri güncellemek, arka plan thread'inden
+                    # yapılan page.update() çağrısının bazı Flet sürümlerinde
+                    # ekrana yansımaması sorununu çözüyor.
                     try:
-                        total = self.focus_minutes * 60
-                        self.clock_text.value = fmt_clock(self.focus_remaining)
-                        if self.focus_ring is not None:
-                            self.focus_ring.value = 1 - (
-                                self.focus_remaining / total if total else 0
-                            )
-                        # Tek tek kontrolleri güncellemek, arka plan thread'inden
-                        # yapılan page.update() çağrısının bazı Flet sürümlerinde
-                        # ekrana yansımaması sorununu çözüyor.
-                        try:
-                            self.clock_text.update()
-                        except Exception:
-                            pass
-                        try:
-                            if self.focus_ring is not None:
-                                self.focus_ring.update()
-                        except Exception:
-                            pass
-                        self.page.update()
+                        self.clock_text.update()
                     except Exception:
                         pass
-            if self.focus_running and self.focus_remaining <= 0:
-                self.focus_running = False
-                clear_run_state(self.page)
-                self.focus_started_at = None
-                add_focus_seconds(self.page, self.today(), self.focus_minutes * 60)
-                add_session(self.page, self.today(), self.focus_minutes * 60, self.focus_label)
-                remember_session_label(self.page, self.focus_label)
-                self.focus_remaining = self.focus_minutes * 60
-                try:
-                    self.refresh()
-                    self.check_milestones()
+                    try:
+                        if self.focus_ring is not None:
+                            self.focus_ring.update()
+                    except Exception:
+                        pass
+                    self.page.update()
                 except Exception:
                     pass
-
-        self.focus_thread = threading.Thread(target=run, daemon=True)
-        self.focus_thread.start()
+        if self.focus_running and self.focus_remaining <= 0:
+            self.focus_running = False
+            clear_run_state(self.page)
+            self.focus_started_at = None
+            add_focus_seconds(self.page, self.today(), self.focus_minutes * 60)
+            add_session(self.page, self.today(), self.focus_minutes * 60, self.focus_label)
+            remember_session_label(self.page, self.focus_label)
+            self.focus_remaining = self.focus_minutes * 60
+            try:
+                self.refresh()
+                self.check_milestones()
+            except Exception:
+                pass
 
     # ---------------- SPOR ------------------------------------
     def build_sports_screen(self):
@@ -3736,7 +3654,7 @@ class OrganizerApp:
 
         header_cells = [
             ft.Container(
-                width=34,
+                width=36,
                 content=ft.Text(
                     lbl,
                     size=9,
@@ -3749,7 +3667,7 @@ class OrganizerApp:
         ]
         header_cells.append(
             ft.Container(
-                width=40,
+                width=42,
                 content=ft.Text(
                     self.t("week_short"),
                     size=9,
@@ -3771,7 +3689,7 @@ class OrganizerApp:
             row_items = []
             for day in week:
                 if day is None:
-                    row_items.append(ft.Container(width=34, height=42))
+                    row_items.append(ft.Container(width=36, height=45))
                     continue
                 key = f"{year:04d}-{month:02d}-{day:02d}"
                 secs = history.get(key, 0)
@@ -3804,8 +3722,8 @@ class OrganizerApp:
                     )
                 row_items.append(
                     ft.Container(
-                        width=34,
-                        height=42,
+                        width=36,
+                        height=45,
                         bgcolor=bg,
                         border_radius=9,
                         border=ft.Border.all(
@@ -3820,8 +3738,8 @@ class OrganizerApp:
             month_total += week_total
             row_items.append(
                 ft.Container(
-                    width=40,
-                    height=42,
+                    width=42,
+                    height=45,
                     alignment=ft.Alignment.CENTER,
                     content=ft.Text(
                         fmt_short(week_total) or "·",
@@ -4782,8 +4700,6 @@ class OrganizerApp:
 
         theme = self.theme
         secs = self.focus_seconds_today()
-        names, done = self.habits_today()
-        pending = [n for n in names if n not in done]
         gym = self.gym_state()
         gym_done = sum(1 for g in gym if g["done"])
 
@@ -4791,11 +4707,7 @@ class OrganizerApp:
             f"{self.t('focus_label')}: {fmt_hm(secs)}",
             f"Gym: {gym_done}/4",
         ]
-        if names:
-            lines.append(f"{self.t('habit_row')}: {len(done)}/{len(names)}")
-        if pending:
-            lines.append("· " + ", ".join(pending[:3]))
-        if not pending and secs > 0:
+        if secs > 0:
             lines.append(self.t("all_clear"))
 
         mark_reminder_shown(self.page, today)
@@ -4942,7 +4854,12 @@ class OrganizerApp:
                 except Exception:
                     pass
 
-        threading.Thread(target=run, daemon=True).start()
+        # page.run_thread, arka plan isinin dogru sayfa baglaminda calismasini
+        # saglar; aksi halde bulut senkronu bitince ekran otomatik yenilenmez.
+        try:
+            self.page.run_thread(run)
+        except Exception:
+            threading.Thread(target=run, daemon=True).start()
 
 
 def main(page: ft.Page):
