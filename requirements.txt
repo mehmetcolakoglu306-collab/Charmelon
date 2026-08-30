@@ -1,2 +1,2 @@
 ﻿requests
-flet
+flet<0.85.0
