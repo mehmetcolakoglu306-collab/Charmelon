@@ -2361,7 +2361,7 @@ def panel(theme, controls, padding=None):
         content=ft.Column(controls, spacing=0, tight=True),
         bgcolor=theme["panel"],
         border_radius=18,
-        padding=padding if padding is not None else ft.padding.symmetric(0, 16),
+        padding=padding if padding is not None else ft.Padding.symmetric(vertical=0, horizontal=16),
     )
 
 
@@ -2379,8 +2379,8 @@ def data_row(theme, label, value, value_color=None, trailing=None, last=False):
             ],
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
         ),
-        padding=ft.padding.symmetric(12, 0),
-        border=None if last else ft.border.only(bottom=ft.border.BorderSide(1, theme["line"])),
+        padding=ft.Padding.symmetric(vertical=12, horizontal=0),
+        border=None if last else ft.Border.only(bottom=ft.BorderSide(1, theme["line"])),
     )
 
 
@@ -2394,7 +2394,7 @@ def soft_block(theme, kicker, text, tone="accent"):
         ),
         bgcolor=ft.Colors.with_opacity(0.12, tone_color),
         border_radius=16,
-        padding=ft.padding.symmetric(12, 15),
+        padding=ft.Padding.symmetric(vertical=12, horizontal=15),
     )
 
 
@@ -2412,7 +2412,7 @@ def section(theme, title, controls, open_state, on_toggle, accent=False):
             ],
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
         ),
-        padding=ft.padding.symmetric(13, 0),
+        padding=ft.Padding.symmetric(vertical=13, horizontal=0),
         on_click=on_toggle,
         ink=True,
     )
@@ -2421,7 +2421,7 @@ def section(theme, title, controls, open_state, on_toggle, accent=False):
         items += [ft.Container(height=4)] + controls + [ft.Container(height=12)]
     return ft.Container(
         content=ft.Column(items, spacing=0, tight=True),
-        border=ft.border.only(bottom=ft.border.BorderSide(1, theme["line"])),
+        border=ft.Border.only(bottom=ft.BorderSide(1, theme["line"])),
     )
 
 
@@ -2436,8 +2436,8 @@ def pill(theme, text, active=False, on_click=None, expand=True, width=None):
         ),
         bgcolor=theme["accent"] if active else theme["accent_soft"],
         border_radius=999,
-        padding=ft.padding.symmetric(9, 0),
-        alignment=ft.alignment.center,
+        padding=ft.Padding.symmetric(vertical=9, horizontal=0),
+        alignment=ft.Alignment.CENTER,
         expand=expand,
         width=width,
         on_click=on_click,
@@ -2457,8 +2457,8 @@ def primary_button(theme, text, on_click, expand=True, width=None):
         ),
         bgcolor=theme["primary_btn"],
         border_radius=999,
-        padding=ft.padding.symmetric(15, 0),
-        alignment=ft.alignment.center,
+        padding=ft.Padding.symmetric(vertical=15, horizontal=0),
+        alignment=ft.Alignment.CENTER,
         expand=expand,
         width=width,
         on_click=on_click,
@@ -2476,10 +2476,10 @@ def quiet_button(theme, text, on_click, expand=True, width=None):
             text_align=ft.TextAlign.CENTER,
         ),
         bgcolor=theme["panel"],
-        border=None if theme["dark"] else ft.border.all(1, theme["line"]),
+        border=None if theme["dark"] else ft.Border.all(1, theme["line"]),
         border_radius=999,
-        padding=ft.padding.symmetric(15, 0),
-        alignment=ft.alignment.center,
+        padding=ft.Padding.symmetric(vertical=15, horizontal=0),
+        alignment=ft.Alignment.CENTER,
         expand=expand,
         width=width,
         on_click=on_click,
@@ -2504,7 +2504,7 @@ def ring(theme, value, size, center, stroke=3, control=None):
             [
                 ft.Container(width=size, height=size, content=control),
                 ft.Container(
-                    width=size, height=size, content=center, alignment=ft.alignment.center
+                    width=size, height=size, content=center, alignment=ft.Alignment.CENTER
                 ),
             ]
         ),
@@ -2752,7 +2752,7 @@ class OrganizerApp:
                     ),
                     bgcolor=ft.Colors.with_opacity(0.14, theme["accent"]),
                     border_radius=999,
-                    padding=ft.padding.symmetric(5, 11),
+                    padding=ft.Padding.symmetric(vertical=5, horizontal=11),
                 ),
             ],
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -2858,10 +2858,10 @@ class OrganizerApp:
                         ],
                         spacing=6,
                     ),
-                    padding=ft.padding.only(0, 2, 0, 2),
+                    padding=ft.Padding.only(left=0, top=2, right=0, bottom=2),
                     on_click=lambda e, n=name: self.on_toggle_habit(n),
                     ink=True,
-                    border=ft.border.only(bottom=ft.border.BorderSide(1, theme["line"])),
+                    border=ft.Border.only(bottom=ft.BorderSide(1, theme["line"])),
                 )
             )
         self.habit_field = ft.TextField(hint_text=self.t("new_habit"), dense=True, expand=True)
@@ -2876,7 +2876,7 @@ class OrganizerApp:
                     ],
                     spacing=6,
                 ),
-                padding=ft.padding.symmetric(4, 0),
+                padding=ft.Padding.symmetric(vertical=4, horizontal=0),
             )
         )
 
@@ -2891,7 +2891,7 @@ class OrganizerApp:
             ),
             ft.Container(height=6),
             ft.Container(
-                content=ring(theme, secs / goal, 212, center), alignment=ft.alignment.center
+                content=ring(theme, secs / goal, 212, center), alignment=ft.Alignment.CENTER
             ),
             ft.Container(height=18),
             week_bars(theme, self.week_focus_values(), highlight_index=datetime.now().weekday()),
@@ -3038,7 +3038,7 @@ class OrganizerApp:
                             ),
                             bgcolor=ft.Colors.with_opacity(0.14, theme["accent"]),
                             border_radius=999,
-                            padding=ft.padding.symmetric(5, 11),
+                            padding=ft.Padding.symmetric(vertical=5, horizontal=11),
                         ),
                     ],
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -3046,7 +3046,7 @@ class OrganizerApp:
                 ft.Container(height=16),
                 ft.Container(
                     content=ring(theme, progress, 236, center, control=self.focus_ring),
-                    alignment=ft.alignment.center,
+                    alignment=ft.Alignment.CENTER,
                 ),
                 ft.Container(height=16),
                 ft.Row(
@@ -3318,7 +3318,7 @@ class OrganizerApp:
                         ),
                         bgcolor=theme["panel"],
                         border_radius=16,
-                        padding=ft.padding.symmetric(14, 15),
+                        padding=ft.Padding.symmetric(vertical=14, horizontal=15),
                     )
                 )
             else:
@@ -3369,14 +3369,14 @@ class OrganizerApp:
                             spacing=12,
                         ),
                         bgcolor=ft.Colors.with_opacity(0.10, theme["accent"]) if overdue else None,
-                        border=ft.border.all(
+                        border=ft.Border.all(
                             1,
                             ft.Colors.with_opacity(0.5, theme["accent"])
                             if overdue
                             else theme["line"],
                         ),
                         border_radius=16,
-                        padding=ft.padding.symmetric(13, 14),
+                        padding=ft.Padding.symmetric(vertical=13, horizontal=14),
                         animate=ft.Animation(200, ft.AnimationCurve.EASE_OUT),
                     )
                 )
@@ -3737,7 +3737,7 @@ class OrganizerApp:
                             horizontal_alignment=ft.CrossAxisAlignment.CENTER,
                             tight=True,
                         ),
-                        alignment=ft.alignment.center,
+                        alignment=ft.Alignment.CENTER,
                         expand=True,
                     )
                 ]
@@ -3753,7 +3753,7 @@ class OrganizerApp:
                         height=42,
                         bgcolor=bg,
                         border_radius=9,
-                        border=ft.border.all(
+                        border=ft.Border.all(
                             1.5 if is_today else 1,
                             theme["accent"] if is_today else theme["line"],
                         ),
@@ -3767,7 +3767,7 @@ class OrganizerApp:
                 ft.Container(
                     width=40,
                     height=42,
-                    alignment=ft.alignment.center,
+                    alignment=ft.Alignment.CENTER,
                     content=ft.Text(
                         fmt_short(week_total) or "·",
                         size=9.5,
@@ -3851,7 +3851,7 @@ class OrganizerApp:
                     ),
                     bgcolor=theme["panel"],
                     border_radius=18,
-                    padding=ft.padding.symmetric(12, 10),
+                    padding=ft.Padding.symmetric(vertical=12, horizontal=10),
                 ),
                 ft.Container(height=14),
                 ft.Row(legend_items, spacing=10, wrap=True),
@@ -4139,7 +4139,7 @@ class OrganizerApp:
                 ),
                 bgcolor=theme["panel"],
                 border_radius=16,
-                padding=ft.padding.symmetric(12, 13),
+                padding=ft.Padding.symmetric(vertical=12, horizontal=13),
                 expand=True,
             )
 
@@ -4157,7 +4157,7 @@ class OrganizerApp:
                             ),
                             bgcolor=grade_color,
                             border_radius=999,
-                            padding=ft.padding.symmetric(5, 11),
+                            padding=ft.Padding.symmetric(vertical=5, horizontal=11),
                         ),
                     ],
                     alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -4211,7 +4211,7 @@ class OrganizerApp:
                     ),
                     bgcolor=theme["panel"],
                     border_radius=18,
-                    padding=ft.padding.symmetric(14, 14),
+                    padding=ft.Padding.symmetric(vertical=14, horizontal=14),
                 ),
                 ft.Container(height=12),
                 ft.Row(
@@ -4784,7 +4784,7 @@ class OrganizerApp:
             set_account_code(page, generate_account_code())
 
         self.header = ft.Container(
-            content=self.build_header(), padding=ft.padding.only(20, 14, 8, 6)
+            content=self.build_header(), padding=ft.Padding.only(left=20, top=14, right=8, bottom=6)
         )
         self.nav = ft.NavigationBar(
             selected_index=self.tab,
@@ -4805,7 +4805,7 @@ class OrganizerApp:
         )
         self.body.content = self.build_screen()
         self.body_wrap = ft.Container(
-            content=self.body, padding=ft.padding.symmetric(0, 20), expand=True
+            content=self.body, padding=ft.Padding.symmetric(vertical=0, horizontal=20), expand=True
         )
 
         page.add(ft.Column([self.header, self.body_wrap], spacing=0, expand=True))
