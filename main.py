@@ -1983,6 +1983,12 @@ UI_LABELS = {
     "add": ("Ekle", "Add"),
     "no_record": ("Kayıt yok", "No records"),
     "last_weight": ("SON ÖLÇÜM · KG", "LAST · KG"),
+    "weight_today_instruction": (
+        "Bugünkü kilonu gir ve kaydet",
+        "Enter and save today's weight",
+    ),
+    "weight_enter_hint": ("Örn: 78.5", "e.g. 78.5"),
+    "weight_history_label": ("SON ÖLÇÜMLER", "RECENT RECORDS"),
     "my_goal": ("HEDEFİM", "MY GOAL"),
     "goal_lose": ("Vermek", "Lose"),
     "goal_maintain": ("Korumak", "Maintain"),
@@ -2552,6 +2558,7 @@ class OrganizerApp:
         self.focus_thread = None
         self.clock_text = None
         self.focus_ring = None
+        self._swipe_dx = 0.0
         self.body = ft.AnimatedSwitcher(
             content=ft.Container(),
             transition=ft.AnimatedSwitcherTransition.FADE,
@@ -2611,9 +2618,15 @@ class OrganizerApp:
         return names, done
 
     def toast(self, message):
+        sb = ft.SnackBar(content=ft.Text(message))
         try:
-            self.page.snack_bar = ft.SnackBar(content=ft.Text(message))
-            self.page.snack_bar.open = True
+            self.page.open(sb)
+            return
+        except Exception:
+            pass
+        try:
+            self.page.snack_bar = sb
+            sb.open = True
             self.page.update()
         except Exception:
             pass
@@ -2638,6 +2651,27 @@ class OrganizerApp:
         self.tab = i
         save_int_pref(self.page, LAST_TAB_KEY, i)
         self.refresh()
+
+    # -- sekmeler arasi kaydirma (swipe) --------------------------
+    def on_swipe_update(self, e):
+        dx = getattr(e, "delta_x", None)
+        if dx is None:
+            local_delta = getattr(e, "local_delta", None)
+            dx = getattr(local_delta, "x", 0) if local_delta is not None else 0
+        self._swipe_dx += dx or 0
+
+    def on_swipe_end(self, e):
+        dx = self._swipe_dx
+        self._swipe_dx = 0.0
+        if self.settings_open:
+            return
+        threshold = 60
+        if dx <= -threshold:
+            # sola kaydirma -> sonraki sekme
+            self.set_tab(min(self.tab + 1, 4))
+        elif dx >= threshold:
+            # saga kaydirma -> onceki sekme
+            self.set_tab(max(self.tab - 1, 0))
 
     def toggle_theme(self, e=None):
         self.theme_key = "kagit" if self.theme_key == "buz" else "buz"
@@ -3208,9 +3242,21 @@ class OrganizerApp:
                             self.focus_ring.value = 1 - (
                                 self.focus_remaining / total if total else 0
                             )
+                        # Tek tek kontrolleri güncellemek, arka plan thread'inden
+                        # yapılan page.update() çağrısının bazı Flet sürümlerinde
+                        # ekrana yansımaması sorununu çözüyor.
+                        try:
+                            self.clock_text.update()
+                        except Exception:
+                            pass
+                        try:
+                            if self.focus_ring is not None:
+                                self.focus_ring.update()
+                        except Exception:
+                            pass
                         self.page.update()
                     except Exception:
-                        return
+                        pass
             if self.focus_running and self.focus_remaining <= 0:
                 self.focus_running = False
                 clear_run_state(self.page)
@@ -3580,7 +3626,12 @@ class OrganizerApp:
                 panel(theme, avg_rows),
             ]
 
-        self.weight_field = ft.TextField(hint_text="kg", dense=True, expand=True)
+        self.weight_field = ft.TextField(
+            hint_text=self.t("weight_enter_hint"),
+            dense=True,
+            expand=True,
+            keyboard_type=ft.KeyboardType.NUMBER,
+        )
         latest = f"{history[keys[0]]:.1f}" if keys else "—"
         return ft.Column(
             [
@@ -3593,10 +3644,8 @@ class OrganizerApp:
                     vertical_alignment=ft.CrossAxisAlignment.END,
                 ),
                 ft.Container(height=16),
-                label_text(theme, self.t("my_goal"), theme["ink_45"]),
+                label_text(theme, self.t("weight_today_instruction"), theme["ink_45"]),
                 ft.Container(height=8),
-                goal_pills,
-                ft.Container(height=18),
                 ft.Row(
                     [
                         self.weight_field,
@@ -3607,6 +3656,12 @@ class OrganizerApp:
                     spacing=8,
                 ),
                 ft.Container(height=18),
+                label_text(theme, self.t("my_goal"), theme["ink_45"]),
+                ft.Container(height=8),
+                goal_pills,
+                ft.Container(height=18),
+                label_text(theme, self.t("weight_history_label"), theme["ink_45"]),
+                ft.Container(height=8),
                 panel(theme, rows),
             ]
             + blocks,
@@ -4591,9 +4646,12 @@ class OrganizerApp:
         )
 
     def toggle_section(self, name):
-        self.open_sections[name] = not self.open_sections.get(
-            name, name == "account"
-        )
+        currently_open = self.open_sections.get(name, name == "account")
+        # Akordiyon davranisi: bir bolum acilirken digerleri kapansin,
+        # liste gereksiz yere uzamasin.
+        self.open_sections = {"account": False, "appearance": False, "reminder": False,
+                               "goal": False, "stats": False, "danger": False}
+        self.open_sections[name] = not currently_open
         self.refresh()
 
     def set_reminder(self, on, hour):
@@ -4653,22 +4711,45 @@ class OrganizerApp:
     # ---------------- DIYALOG YARDIMCILARI --------------------
     def show_dialog(self, dlg):
         self.dialog = dlg
+        # Flet surumune gore dialog gosterme API'si degisebiliyor
+        # (show_dialog / open / eski dialog property). Hepsini sirayla
+        # deniyoruz ki versiyon farkindan diyalog sessizce kaybolmasin.
+        try:
+            self.page.show_dialog(dlg)
+            return
+        except Exception:
+            pass
         try:
             self.page.open(dlg)
+            return
         except Exception:
+            pass
+        try:
             self.page.dialog = dlg
             dlg.open = True
             self.page.update()
+        except Exception:
+            pass
 
     def close_dialog(self):
         dlg = getattr(self, "dialog", None)
         if dlg is None:
             return
         try:
-            self.page.close(dlg)
+            self.page.pop_dialog()
+            return
         except Exception:
+            pass
+        try:
+            self.page.close(dlg)
+            return
+        except Exception:
+            pass
+        try:
             dlg.open = False
             self.page.update()
+        except Exception:
+            pass
 
     def open_choice_dialog(self, title, options, on_pick):
         theme = self.theme
@@ -4805,7 +4886,13 @@ class OrganizerApp:
         )
         self.body.content = self.build_screen()
         self.body_wrap = ft.Container(
-            content=self.body, padding=ft.Padding.symmetric(vertical=0, horizontal=20), expand=True
+            content=ft.GestureDetector(
+                content=self.body,
+                on_horizontal_drag_update=self.on_swipe_update,
+                on_horizontal_drag_end=self.on_swipe_end,
+            ),
+            padding=ft.Padding.symmetric(vertical=0, horizontal=20),
+            expand=True,
         )
 
         page.add(ft.Column([self.header, self.body_wrap], spacing=0, expand=True))
