@@ -59,7 +59,12 @@ def set_account_code(page: ft.Page, code):
 
 
 def firestore_get_field(account_code: str, field_name: str):
-    """Firestore'daki belirtilen alani ceker. Basarisizsa None doner."""
+    """Firestore'daki belirtilen alani ceker.
+    Onemli: 404 (bu hesap kodu bulutta hic olusturulmamis) ile gercek bos
+    veriyi ({}) birbirinden ayirmak icin 404/hata durumunda None donuyoruz.
+    Cagiran taraf (sync_field_from_cloud) None gordugunde yerel veriyi
+    ASLA silmiyor -- aksi halde var olmayan/yanlis yazilan bir kod girildiginde
+    cihazdaki tum gecmis veri sessizce bos veriyle degistirilirdi."""
     if requests is None:
         return None
     url = f"{FIRESTORE_BASE}/accounts/{account_code}?key={FIREBASE_API_KEY}"
@@ -70,8 +75,6 @@ def firestore_get_field(account_code: str, field_name: str):
             fields = data.get("fields", {})
             json_str = fields.get(field_name, {}).get("stringValue", "{}")
             return json.loads(json_str)
-        elif resp.status_code == 404:
-            return {}
         return None
     except Exception:
         return None
@@ -90,29 +93,6 @@ def firestore_set_field(account_code: str, field_name: str, data: dict):
         return resp.status_code in (200, 201)
     except Exception:
         return False
-
-
-def firestore_get_history(account_code: str):
-    return firestore_get_field(account_code, "history_json")
-
-
-def firestore_set_history(account_code: str, history: dict):
-    return firestore_set_field(account_code, "history_json", history)
-
-
-def firestore_account_exists(account_code: str):
-    if requests is None:
-        return None
-    url = f"{FIRESTORE_BASE}/accounts/{account_code}?key={FIREBASE_API_KEY}"
-    try:
-        resp = requests.get(url, timeout=8)
-        if resp.status_code == 200:
-            return True
-        if resp.status_code == 404:
-            return False
-        return None
-    except Exception:
-        return None
 
 
 def generate_account_code():
@@ -156,16 +136,19 @@ def _load_cached_or_remote(page: ft.Page, field_name: str, cache_key: str) -> di
     return data
 
 
-def sync_field_from_cloud(page: ft.Page, field_name: str, cache_key: str) -> bool:
+def sync_field_from_cloud(page: ft.Page, field_name: str, cache_key: str):
     """Buluttan bir alani ceker; yerelden farkliysa onbellegi gunceller.
-    Yalnizca arka plan is parcasindan cagrilmalidir."""
+    Yalnizca arka plan is parcasindan cagrilmalidir.
+    Donus degeri UC durumlu: None = hesap kodu bulutta bulunamadi ya da aga
+    erisilemedi (bu durumda yerel veriye ASLA dokunulmaz); False = bulundu
+    ama yerelle ayniydi; True = bulundu ve yerel onbellek guncellendi."""
     code = get_account_code(page)
     if not code or field_name in _SYNCED_FIELDS:
-        return False
+        return None
     remote = firestore_get_field(code, field_name)
     _SYNCED_FIELDS.add(field_name)
     if remote is None or not isinstance(remote, dict):
-        return False
+        return None
     changed = _MEM_CACHE.get(cache_key) != remote
     _MEM_CACHE[cache_key] = remote
     try:
@@ -311,38 +294,6 @@ def set_match_count_for_date(page: ft.Page, date_str: str, count: int):
     else:
         history[date_str] = count
     save_match_history(page, history)
-
-
-def load_habit_list(page: ft.Page):
-    data = _load_cached_or_remote(page, "habits_list_json", "habits_list")
-    names = data.get("names") if isinstance(data, dict) else None
-    return names if isinstance(names, list) else []
-
-
-def save_habit_list(page: ft.Page, names: list):
-    _save_cached_and_remote(page, "habits_list_json", "habits_list", {"names": names})
-
-
-def load_habit_completions(page: ft.Page) -> dict:
-    data = _load_cached_or_remote(page, "habits_completions_json", "habits_completions")
-    return data if isinstance(data, dict) else {}
-
-
-def save_habit_completions(page: ft.Page, data: dict):
-    _save_cached_and_remote(page, "habits_completions_json", "habits_completions", data)
-
-
-def toggle_habit_completion(page: ft.Page, date_str: str, habit_name: str):
-    data = load_habit_completions(page)
-    day_list = data.get(date_str, [])
-    if not isinstance(day_list, list):
-        day_list = []
-    if habit_name in day_list:
-        day_list.remove(habit_name)
-    else:
-        day_list.append(habit_name)
-    data[date_str] = day_list
-    save_habit_completions(page, data)
 
 
 # --- Kilometre taslari ---
@@ -594,41 +545,6 @@ def delete_day_note(page: ft.Page, date_str: str):
     save_day_notes(page, notes)
 
 
-# --- Aliskanlik serisi ---
-def compute_habit_streak(completions: dict, habit_name: str) -> int:
-    """Bir aliskanlik icin ardisik tamamlama gunu sayisi. Bugun henuz
-    isaretlenmediyse dunden geriye dogru sayar."""
-    if not isinstance(completions, dict):
-        return 0
-    day = datetime.now().date()
-    today_list = completions.get(day.strftime("%Y-%m-%d"), [])
-    if not isinstance(today_list, list) or habit_name not in today_list:
-        day -= timedelta(days=1)
-    streak = 0
-    while True:
-        day_list = completions.get(day.strftime("%Y-%m-%d"), [])
-        if isinstance(day_list, list) and habit_name in day_list:
-            streak += 1
-            day -= timedelta(days=1)
-        else:
-            break
-    return streak
-
-
-def compute_habit_completion_count(completions: dict, habit_name: str, days_back: int = 30) -> int:
-    """Son N gunde bir aliskanligin kac kez tamamlandigini sayar."""
-    if not isinstance(completions, dict):
-        return 0
-    count = 0
-    today = datetime.now().date()
-    for i in range(days_back):
-        d = today - timedelta(days=i)
-        day_list = completions.get(d.strftime("%Y-%m-%d"), [])
-        if isinstance(day_list, list) and habit_name in day_list:
-            count += 1
-    return count
-
-
 # --- Gunu sifirlama (tek merkezi islem) ---
 def delete_focus_entry(page: ft.Page, date_str: str):
     history = load_history(page)
@@ -668,16 +584,9 @@ def reset_gym_entries_for_date(page: ft.Page, date_str: str):
         save_gym_history(page, gym_history)
 
 
-def clear_habit_completions_for_date(page: ft.Page, date_str: str):
-    data = load_habit_completions(page)
-    if isinstance(data, dict):
-        data.pop(date_str, None)
-        save_habit_completions(page, data)
-
-
 def reset_day_data(page: ft.Page, date_str: str):
     """Belirli bir gunun tum verilerini (odaklanma, yuzme, gym, kilo, mac,
-    ekstra antrenman, aliskanliklar, not) sifirlar."""
+    ekstra antrenman, not) sifirlar."""
     for func, args in [
         (delete_focus_entry, (page, date_str)),
         (set_swim_seconds_for_date, (page, date_str, 0)),
@@ -685,7 +594,6 @@ def reset_day_data(page: ft.Page, date_str: str):
         (set_match_count_for_date, (page, date_str, 0)),
         (delete_extra_for_date, (page, date_str)),
         (reset_gym_entries_for_date, (page, date_str)),
-        (clear_habit_completions_for_date, (page, date_str)),
         (delete_day_note, (page, date_str)),
     ]:
         try:
@@ -2107,6 +2015,12 @@ UI_LABELS = {
     "reset_this_day": ("Bu günü sıfırla", "Reset this day"),
     "sync_done": ("Senkronizasyon tamam", "Sync complete"),
     "code_applied": ("Kod uygulandı, veriler çekiliyor", "Code applied, pulling data"),
+    "invalid_code": ("Geçersiz kod, 6 haneli sayı gir", "Invalid code, enter a 6-digit number"),
+    "code_found": ("Kod bulundu, verilerin senkronize edildi", "Code found, your data was synced"),
+    "code_missing": (
+        "Bu kod bulutta yok, cihazındaki veriler bu koda kaydedilecek",
+        "This code doesn't exist in the cloud yet, your device data will be saved to it",
+    ),
     "saved": ("Kaydedildi", "Saved"),
     "congrats": ("Tebrikler!", "Congratulations!"),
     "awesome": ("Harika!", "Awesome!"),
@@ -2559,6 +2473,7 @@ class OrganizerApp:
         self.clock_text = None
         self.focus_ring = None
         self._swipe_dx = 0.0
+        self.body_shift = None  # mount() icinde ft.Container olarak kurulur
         self.body = ft.AnimatedSwitcher(
             content=ft.Container(),
             transition=ft.AnimatedSwitcherTransition.FADE,
@@ -2648,16 +2563,51 @@ class OrganizerApp:
         self.refresh()
 
     # -- sekmeler arasi kaydirma (swipe) --------------------------
+    # Icerik artik parmagi CANLI takip ediyor (on_swipe_update sirasinda
+    # aninda kayiyor, animasyonsuz) ve birakildiginda ya yumusakca
+    # merkeze donuyor ya da sekme degisimiyle birlikte hafif bir "firlama"
+    # hissi veriyor. Eskiden parmakla surukleme sirasinda ekranda hicbir
+    # sey olmuyordu (bu yuzden "ruhsuz" hissettiriyordu); simdi icerik
+    # gercekten elle beraber hareket ediyor.
     def on_swipe_update(self, e):
         dx = getattr(e, "delta_x", None)
         if dx is None:
             local_delta = getattr(e, "local_delta", None)
             dx = getattr(local_delta, "x", 0) if local_delta is not None else 0
         self._swipe_dx += dx or 0
+        if self.settings_open or self.body_shift is None:
+            return
+        at_first = self.tab == 0
+        at_last = self.tab == 4
+        raw = self._swipe_dx
+        # ilk/son sekmede daha ileri kaydirmaya karsi "lastik" direnci
+        if (raw > 0 and at_first) or (raw < 0 and at_last):
+            raw *= 0.35
+        max_px = 90
+        shift_px = max(-max_px, min(max_px, raw))
+        try:
+            width = self.body_shift.width or self.page.width or 340
+        except Exception:
+            width = 340
+        # surukleme sirasinda animasyon KAPALI: parmakla birebir, aninda takip
+        self.body_shift.animate_offset = None
+        self.body_shift.offset = ft.Offset(shift_px / max(width, 1), 0)
+        try:
+            self.body_shift.update()
+        except Exception:
+            pass
 
     def on_swipe_end(self, e):
         dx = self._swipe_dx
         self._swipe_dx = 0.0
+        if self.body_shift is not None:
+            # birakinca: yumusak bir yayla merkeze don
+            self.body_shift.animate_offset = ft.Animation(220, ft.AnimationCurve.EASE_OUT_CUBIC)
+            self.body_shift.offset = ft.Offset(0, 0)
+            try:
+                self.body_shift.update()
+            except Exception:
+                pass
         if self.settings_open:
             return
         threshold = 60
@@ -4589,12 +4539,15 @@ class OrganizerApp:
     def on_use_code(self, e):
         code = (self.code_field.value or "").strip()
         if len(code) != 6 or not code.isdigit():
+            self.toast(self.t("invalid_code"))
             return
         set_account_code(self.page, code)
         _MEM_CACHE.clear()
         _SYNCED_FIELDS.clear()
         self.toast(self.t("code_applied"))
-        self.start_cloud_sync()
+        self.start_cloud_sync(
+            on_done=lambda found: self.toast(self.t("code_found") if found else self.t("code_missing"))
+        )
         self.refresh()
 
     def on_new_code(self, e):
@@ -4605,7 +4558,9 @@ class OrganizerApp:
     def on_sync_now(self, e):
         _SYNCED_FIELDS.clear()
         self.toast(self.t("sync_now"))
-        self.start_cloud_sync()
+        self.start_cloud_sync(
+            on_done=lambda found: self.toast(self.t("sync_done") if found else self.t("code_missing"))
+        )
 
     def on_save_goal(self, e):
         try:
@@ -4797,9 +4752,15 @@ class OrganizerApp:
             ],
         )
         self.body.content = self.build_screen()
+        self.body_shift = ft.Container(
+            content=self.body,
+            offset=ft.Offset(0, 0),
+            animate_offset=ft.Animation(220, ft.AnimationCurve.EASE_OUT_CUBIC),
+            expand=True,
+        )
         self.body_wrap = ft.Container(
             content=ft.GestureDetector(
-                content=self.body,
+                content=self.body_shift,
                 on_horizontal_drag_update=self.on_swipe_update,
                 on_horizontal_drag_end=self.on_swipe_end,
             ),
@@ -4837,20 +4798,31 @@ class OrganizerApp:
             pass
         self.check_milestones()
 
-    def start_cloud_sync(self):
-        """Bulut verisini arka planda ceker; degisiklik varsa ekrani yeniler."""
+    def start_cloud_sync(self, on_done=None):
+        """Bulut verisini arka planda ceker; degisiklik varsa ekrani yeniler.
+        on_done(found: bool) verilirse, hesap kodunun bulutta gercekten
+        bulunup bulunmadigi bilgisiyle en sonda bir kez cagrilir."""
 
         def run():
             changed = False
+            found_any = False
             for field_name, cache_key in CLOUD_FIELDS:
                 try:
-                    if sync_field_from_cloud(self.page, field_name, cache_key):
-                        changed = True
+                    result = sync_field_from_cloud(self.page, field_name, cache_key)
                 except Exception:
-                    pass
+                    result = None
+                if result is not None:
+                    found_any = True
+                    if result:
+                        changed = True
             if changed:
                 try:
                     self.refresh()
+                except Exception:
+                    pass
+            if on_done is not None:
+                try:
+                    on_done(found_any)
                 except Exception:
                     pass
 
