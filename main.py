@@ -20,6 +20,7 @@ except AttributeError:
     _SPORTS_TAB_ICON = ft.Icons.SPORTS
 import time
 import threading
+import asyncio
 import json
 import random
 import calendar as cal_module
@@ -3076,58 +3077,79 @@ class OrganizerApp:
         if getattr(self, "_timer_running_flag", False):
             return
 
+        # page.run_task, gorevi sayfanin KENDI asyncio event loop'unda
+        # calistirir (page.run_thread gibi ayri bir OS thread'inde degil).
+        # page.run_thread + saniye basi page.update() denendiginde bazi
+        # cihazlarda deger dogru hesaplaniyor ama ekrana YANSIMIYORDU --
+        # yalnizca kullanici bir yere dokunup baska bir olay tetikleyince
+        # (o da kendi event loop turunda) guncelleniyordu. Sayfayla ayni
+        # event loop'ta calisan bir async gorev bu sorunu kokten cozuyor:
+        # kronometre artik ekrana hic dokunmadan, kesintisiz akiyor.
+        try:
+            self.page.run_task(self._timer_loop_async)
+            return
+        except Exception:
+            pass
+
+        # eski Flet surumleri icin geri dusme (thread tabanli)
         def run():
             self._timer_running_flag = True
             try:
-                self._timer_loop()
+                self._timer_loop_sync()
             finally:
                 self._timer_running_flag = False
 
-        # threading.Thread yerine page.run_thread kullanmak, arka plan
-        # thread'inin dogru "sayfa baglamina" (page context) baglanmasini
-        # sagliyor - aksi halde page.update() cagrilari istemciye
-        # yansimiyor ve kronometre ancak ekrana dokununca guncelleniyordu.
         try:
             self.page.run_thread(run)
         except Exception:
             self.focus_thread = threading.Thread(target=run, daemon=True)
             self.focus_thread.start()
 
-    def _timer_loop(self):
+    async def _timer_loop_async(self):
+        self._timer_running_flag = True
+        try:
+            while self.focus_running and self.focus_remaining > 0:
+                await asyncio.sleep(1)
+                if not self.focus_running:
+                    return
+                self._timer_tick()
+        finally:
+            self._timer_running_flag = False
+        self._timer_finish()
+
+    def _timer_loop_sync(self):
         while self.focus_running and self.focus_remaining > 0:
             time.sleep(1)
             if not self.focus_running:
                 return
-            if self.focus_started_at:
-                self.focus_remaining = max(
-                    0,
-                    int(self.focus_minutes * 60 - (time.time() - self.focus_started_at)),
-                )
-            else:
-                self.focus_remaining -= 1
-            if self.tab == 1 and not self.settings_open and self.clock_text is not None:
-                try:
-                    total = self.focus_minutes * 60
-                    self.clock_text.value = fmt_clock(self.focus_remaining)
-                    if self.focus_ring is not None:
-                        self.focus_ring.value = 1 - (
-                            self.focus_remaining / total if total else 0
-                        )
-                    # Tek tek kontrolleri güncellemek, arka plan thread'inden
-                    # yapılan page.update() çağrısının bazı Flet sürümlerinde
-                    # ekrana yansımaması sorununu çözüyor.
-                    try:
-                        self.clock_text.update()
-                    except Exception:
-                        pass
-                    try:
-                        if self.focus_ring is not None:
-                            self.focus_ring.update()
-                    except Exception:
-                        pass
-                    self.page.update()
-                except Exception:
-                    pass
+            self._timer_tick()
+        self._timer_finish()
+
+    def _timer_tick(self):
+        """Her saniye: kalan sureyi hesaplar ve (Odak sekmesindeyse) ekrani
+        gunceller. Hem async hem senkron dongu tarafindan kullanilir."""
+        if self.focus_started_at:
+            self.focus_remaining = max(
+                0,
+                int(self.focus_minutes * 60 - (time.time() - self.focus_started_at)),
+            )
+        else:
+            self.focus_remaining -= 1
+        if self.tab == 1 and not self.settings_open and self.clock_text is not None:
+            try:
+                total = self.focus_minutes * 60
+                self.clock_text.value = fmt_clock(self.focus_remaining)
+                if self.focus_ring is not None:
+                    self.focus_ring.value = 1 - (
+                        self.focus_remaining / total if total else 0
+                    )
+                self.clock_text.update()
+                if self.focus_ring is not None:
+                    self.focus_ring.update()
+            except Exception:
+                pass
+
+    def _timer_finish(self):
         if self.focus_running and self.focus_remaining <= 0:
             self.focus_running = False
             clear_run_state(self.page)
