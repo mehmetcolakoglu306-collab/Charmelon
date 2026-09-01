@@ -1843,6 +1843,35 @@ THEMES = {
         ],
         "heat_zero_ink": "#8A8479",
     },
+    "karanlik": {
+        # Papara'nin karanlik temasi referans alinarak: neredeyse siyah
+        # zemin, koyu gri kartlar, beyaz/gri metin hiyerarsisi, mavi vurgu.
+        "name": "Karanlık",
+        "dark": True,
+        "bg": "#0D0D0F",
+        "panel": "#1C1C1E",
+        "ink": "#F5F5F7",
+        "ink_70": "#B8B8BD",
+        "ink_45": "#87878D",
+        "line": "#2C2C2F",
+        "accent": "#5487C0",
+        "accent_soft": "#26344A",
+        "on_accent": "#FFFFFF",
+        "positive": "#34C759",
+        "note": "#E0B84A",
+        "primary_btn": "#F5F5F7",
+        "on_primary_btn": "#0D0D0F",
+        "heat": [
+            (1.0, "#1F2733", "#F5F5F7", "#B8B8BD"),
+            (2.0, "#243247", "#F5F5F7", "#B8B8BD"),
+            (3.0, "#2B4568", "#F5F5F7", "#C7D6E8"),
+            (4.0, "#33588A", "#FFFFFF", "#DCE7F4"),
+            (5.0, "#3E6EAC", "#FFFFFF", "#E4EDF8"),
+            (6.0, "#4F86C7", "#FFFFFF", "#EAF1FA"),
+            (999.0, "#5487C0", "#FFFFFF", "#EAF1FA"),
+        ],
+        "heat_zero_ink": "#87878D",
+    },
 }
 
 FOCUS_PRESETS = [25, 45, 60, 90]
@@ -4787,6 +4816,17 @@ class OrganizerApp:
         theme = self.theme
         page.title = "Organizer"
         page.padding = 0
+        # Papara referans alinarak: uygulama genelinde Inter fontu.
+        # Font indirilemezse (agsizlik vb.) Flutter sessizce sistem
+        # fontuna geri doner -- crash riski yok.
+        try:
+            page.fonts = {
+                "Inter": "https://raw.githubusercontent.com/google/fonts/main/ofl/inter/Inter%5Bopsz%2Cwght%5D.ttf",
+            }
+            page.theme = ft.Theme(font_family="Inter")
+            page.dark_theme = ft.Theme(font_family="Inter")
+        except Exception:
+            pass
         page.bgcolor = theme["bg"]
         page.theme_mode = ft.ThemeMode.DARK if theme["dark"] else ft.ThemeMode.LIGHT
 
