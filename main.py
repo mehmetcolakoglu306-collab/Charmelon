@@ -2026,6 +2026,8 @@ UI_LABELS = {
     "use_code": ("Kodu kullan", "Use code"),
     "sync_now": ("Şimdi senkronize et", "Sync now"),
     "new_code": ("Yeni kod üret", "Generate new code"),
+    "new_code_done": ("Yeni kod: {code}", "New code: {code}"),
+    "storage_error": ("Kod kaydedilemedi, tekrar dene", "Could not save the code, try again"),
     "language": ("DİL", "LANGUAGE"),
     "heat_scale": ("ISI SKALASI", "HEAT SCALE"),
     "heat_theme": ("Tema (tek renk)", "Theme (single hue)"),
@@ -4642,8 +4644,23 @@ class OrganizerApp:
         self.refresh()
 
     def on_new_code(self, e):
-        set_account_code(self.page, generate_account_code())
+        new_code = generate_account_code()
+        set_account_code(self.page, new_code)
+        _MEM_CACHE.clear()
         _SYNCED_FIELDS.clear()
+        # client_storage yazmasi dogrulaniyor -- bazi Flet surumlerinde bu
+        # cagri sessizce basarisiz olabiliyor, bu yuzden geri okuyup
+        # gerekirse bir kez daha deniyoruz. Kullaniciya SONUCU her turlu
+        # acikca gosteriyoruz (once buton hicbir geri bildirim vermiyordu,
+        # bu da "hicbir sey olmuyor" hissi yaratiyordu).
+        saved = get_account_code(self.page)
+        if saved != new_code:
+            set_account_code(self.page, new_code)
+            saved = get_account_code(self.page)
+        if saved == new_code:
+            self.toast(self.t("new_code_done", code=new_code))
+        else:
+            self.toast(self.t("storage_error"))
         self.refresh()
 
     def on_sync_now(self, e):
