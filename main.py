@@ -2557,19 +2557,52 @@ class OrganizerApp:
         self.header.content = self.build_header()
         self.page.update()
 
-    def set_tab(self, i):
+    def set_tab(self, i, animate_slide=True):
+        direction = 1 if i > self.tab else (-1 if i < self.tab else 0)
         self.settings_open = False
         self.tab = i
         save_int_pref(self.page, LAST_TAB_KEY, i)
         self.refresh()
+        # Alt navigasyon cubugundan (veya baska programatik bir yerden)
+        # sekme degisince, Papara/benzeri uygulamalardaki gibi yeni icerik
+        # dogru yonden kayarak gelsin. Swipe ile gelen degisiklikte bu
+        # ayri animasyona GEREK YOK -- parmagin birakilisindaki "merkeze
+        # donus" zaten kendi yonlu hareketini veriyor; ikisini ust uste
+        # bindirmek titreme/kasmaya yol acar, o yuzden swipe tarafi
+        # animate_slide=False ile cagiriyor.
+        if animate_slide and direction != 0 and self.body_shift is not None:
+            try:
+                self.page.run_task(self._slide_in_new_tab, direction)
+            except Exception:
+                pass
+
+    async def _slide_in_new_tab(self, direction):
+        """Yeni sekme icerigini sagdan/soldan kaydirarak icine getirir."""
+        if getattr(self, "_tab_anim_running", False):
+            return
+        self._tab_anim_running = True
+        try:
+            enter_from = 0.30 if direction > 0 else -0.30
+            self.body_shift.animate_offset = None
+            self.body_shift.offset = ft.Offset(enter_from, 0)
+            self.body_shift.update()
+            await asyncio.sleep(0.02)
+            self.body_shift.animate_offset = ft.Animation(200, ft.AnimationCurve.EASE_OUT_CUBIC)
+            self.body_shift.offset = ft.Offset(0, 0)
+            self.body_shift.update()
+        except Exception:
+            pass
+        finally:
+            self._tab_anim_running = False
 
     # -- sekmeler arasi kaydirma (swipe) --------------------------
-    # Icerik artik parmagi CANLI takip ediyor (on_swipe_update sirasinda
-    # aninda kayiyor, animasyonsuz) ve birakildiginda ya yumusakca
-    # merkeze donuyor ya da sekme degisimiyle birlikte hafif bir "firlama"
-    # hissi veriyor. Eskiden parmakla surukleme sirasinda ekranda hicbir
-    # sey olmuyordu (bu yuzden "ruhsuz" hissettiriyordu); simdi icerik
-    # gercekten elle beraber hareket ediyor.
+    # Icerik parmagi CANLI takip ediyor (on_swipe_update sirasinda aninda
+    # kayiyor, animasyonsuz) ve birakildiginda yumusakca merkeze donuyor.
+    # Eskiden parmakla surukleme sirasinda ekranda hicbir sey olmuyordu
+    # (bu yuzden "ruhsuz" hissettiriyordu); simdi icerik gercekten elle
+    # beraber hareket ediyor. Performans icin: her piksel degil, en az
+    # ~3px'lik gercek degisimlerde ekrani guncelliyoruz -- aksi halde
+    # hizli kaydirmalarda cok sik update() cagrisi kasmaya yol aciyordu.
     def on_swipe_update(self, e):
         dx = getattr(e, "delta_x", None)
         if dx is None:
@@ -2586,6 +2619,11 @@ class OrganizerApp:
             raw *= 0.35
         max_px = 90
         shift_px = max(-max_px, min(max_px, raw))
+        # asiri sik update() cagrisini onlemek icin kucuk degisimleri atla
+        last_sent = getattr(self, "_last_shift_px", 0)
+        if abs(shift_px - last_sent) < 3 and shift_px not in (-max_px, max_px):
+            return
+        self._last_shift_px = shift_px
         try:
             width = self.body_shift.width or self.page.width or 340
         except Exception:
@@ -2601,8 +2639,10 @@ class OrganizerApp:
     def on_swipe_end(self, e):
         dx = self._swipe_dx
         self._swipe_dx = 0.0
+        self._last_shift_px = 0
         if self.body_shift is not None:
-            # birakinca: yumusak bir yayla merkeze don
+            # birakinca: yumusak bir yayla merkeze don -- bu, sekme
+            # degisimiyle birlikte zaten yonlu bir kayma hissi veriyor
             self.body_shift.animate_offset = ft.Animation(220, ft.AnimationCurve.EASE_OUT_CUBIC)
             self.body_shift.offset = ft.Offset(0, 0)
             try:
@@ -2614,10 +2654,10 @@ class OrganizerApp:
         threshold = 60
         if dx <= -threshold:
             # sola kaydirma -> sonraki sekme
-            self.set_tab(min(self.tab + 1, 4))
+            self.set_tab(min(self.tab + 1, 4), animate_slide=False)
         elif dx >= threshold:
             # saga kaydirma -> onceki sekme
-            self.set_tab(max(self.tab - 1, 0))
+            self.set_tab(max(self.tab - 1, 0), animate_slide=False)
 
     def toggle_theme(self, e=None):
         self.theme_key = "kagit" if self.theme_key == "buz" else "buz"
