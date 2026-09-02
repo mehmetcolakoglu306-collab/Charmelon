@@ -2281,13 +2281,27 @@ def label_totals_for_week(page: ft.Page, offset=0):
     return totals
 
 
+_SESSIONS_CACHE = {}  # date_str -> list -- gunluk seans listesi bellekte de tutuluyor
+
+
 def load_sessions(page: ft.Page, date_str: str):
+    # ONEMLI: bu fonksiyon haftalik etiket kirilimi icin GUN BASINA (ör. hafta
+    # icin 7 kez) cagriliyor. Onbellek olmadan her cagri ayri bir
+    # client_storage yuvarlama-gidis-donusu demekti -- Karne sekmesine her
+    # girildiginde/her yenilendiginde 7 senkron cihaz cagrisi tetikleniyordu,
+    # bu da o sekmede belirgin bir kasmaya yol aciyordu. Diger tum
+    # gecmis-veri fonksiyonlarinda (_load_cached_or_remote) zaten olan aynı
+    # bellek onbellegi mantigini buraya da ekliyoruz.
+    if date_str in _SESSIONS_CACHE:
+        return _SESSIONS_CACHE[date_str]
     try:
         raw = page.client_storage.get("sessions_" + date_str)
         data = json.loads(raw) if raw else []
-        return data if isinstance(data, list) else []
+        data = data if isinstance(data, list) else []
     except Exception:
-        return []
+        data = []
+    _SESSIONS_CACHE[date_str] = data
+    return data
 
 
 def add_session(page: ft.Page, date_str: str, seconds: float, label: str = ""):
@@ -2295,6 +2309,7 @@ def add_session(page: ft.Page, date_str: str, seconds: float, label: str = ""):
     sessions.append(
         {"t": datetime.now().strftime("%H:%M"), "sec": int(seconds), "label": (label or "").strip()}
     )
+    _SESSIONS_CACHE[date_str] = sessions
     try:
         page.client_storage.set("sessions_" + date_str, json.dumps(sessions))
     except Exception:
@@ -2302,6 +2317,7 @@ def add_session(page: ft.Page, date_str: str, seconds: float, label: str = ""):
 
 
 def clear_sessions(page: ft.Page, date_str: str):
+    _SESSIONS_CACHE.pop(date_str, None)
     try:
         page.client_storage.remove("sessions_" + date_str)
     except Exception:
