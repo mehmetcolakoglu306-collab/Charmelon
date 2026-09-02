@@ -2683,11 +2683,13 @@ class OrganizerApp:
     # -- sekmeler arasi kaydirma (swipe) --------------------------
     # Icerik parmagi CANLI takip ediyor (on_swipe_update sirasinda aninda
     # kayiyor, animasyonsuz) ve birakildiginda yumusakca merkeze donuyor.
-    # Eskiden parmakla surukleme sirasinda ekranda hicbir sey olmuyordu
-    # (bu yuzden "ruhsuz" hissettiriyordu); simdi icerik gercekten elle
-    # beraber hareket ediyor. Performans icin: her piksel degil, en az
-    # ~3px'lik gercek degisimlerde ekrani guncelliyoruz -- aksi halde
-    # hizli kaydirmalarda cok sik update() cagrisi kasmaya yol aciyordu.
+    # ONEMLI: eskiden burada max_px=90 diye sabit bir tavan vardi -- yani
+    # parmak ekranin yarisini kat etse bile icerik sadece 90 piksel
+    # kayiyordu. Bu "gercekten parmagi takip etmiyor, sadece hafif bir
+    # ipucu veriyor" hissi yaratiyordu (kullanicinin "Papara'daki gibi TAM
+    # anlamiyla takip etsin" istegi tam da buydu). Simdi tavan ekranin
+    # kendi genisligi -- yani parmak ekranin tamamini kat edince icerik de
+    # neredeyse tamamen kenara kayiyor, gercek 1:1 bir surukleme.
     def on_swipe_update(self, e):
         dx = getattr(e, "delta_x", None)
         if dx is None:
@@ -2702,17 +2704,21 @@ class OrganizerApp:
         # ilk/son sekmede daha ileri kaydirmaya karsi "lastik" direnci
         if (raw > 0 and at_first) or (raw < 0 and at_last):
             raw *= 0.35
-        max_px = 90
-        shift_px = max(-max_px, min(max_px, raw))
-        # asiri sik update() cagrisini onlemek icin kucuk degisimleri atla
-        last_sent = getattr(self, "_last_shift_px", 0)
-        if abs(shift_px - last_sent) < 3 and shift_px not in (-max_px, max_px):
-            return
-        self._last_shift_px = shift_px
         try:
             width = self.body_shift.width or self.page.width or 340
         except Exception:
             width = 340
+        max_px = max(width - 24, 60)  # kenarlarda hafif bosluk birakiyoruz
+        shift_px = max(-max_px, min(max_px, raw))
+        # asiri sik update() cagrisini onlemek icin kucuk degisimleri atla --
+        # 5px'e cikardik: cok hizli kaydirmalarda saniyede onlarca update()
+        # cagrisi cihaza gidip gelmeye calisiyor, bu da genel kasmaya
+        # katkida bulunuyordu. 5px goz ile fark edilmeyecek kadar kucuk
+        # ama cagri sayisini belirgin sekilde azaltiyor.
+        last_sent = getattr(self, "_last_shift_px", 0)
+        if abs(shift_px - last_sent) < 5 and shift_px not in (-max_px, max_px):
+            return
+        self._last_shift_px = shift_px
         # surukleme sirasinda animasyon KAPALI: parmakla birebir, aninda takip
         self.body_shift.animate_offset = None
         self.body_shift.offset = ft.Offset(shift_px / max(width, 1), 0)
@@ -4882,6 +4888,16 @@ class OrganizerApp:
     # ---------------- KURULUM ---------------------------------
     def mount(self):
         page = self.page
+        # ONEMLI: self.theme_key __init__ icinde de bir kez okunuyordu, ama
+        # __init__ kontrol henuz sayfaya gercekten baglanmadan calisabiliyor
+        # -- yani client_storage plugin'i cihazda henuz hazir olmadan
+        # cagriliyor olabilir. Hesap kodu (get_account_code) mount()
+        # icinde okunuyor ve orada guvenilir calisiyordu; tema icin de
+        # ayni, daha guvenilir noktada (mount, sayfa gercekten baglandiktan
+        # sonra) TEKRAR okuyoruz -- kullanicinin "karanlik moda gectim ama
+        # kapatip acinca beyaza donuyor" sikayetinin sebebi muhtemelen
+        # buydu: __init__'teki erken okuma varsayilana ("buz") dusuyordu.
+        self.theme_key = load_theme_key(page)
         theme = self.theme
         page.title = "Organizer"
         page.padding = 0
