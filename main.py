@@ -2519,15 +2519,20 @@ class OrganizerApp:
         self.focus_ring = None
         self._swipe_dx = 0.0
         self.body_shift = None  # mount() icinde ft.Container olarak kurulur
-        self.body = ft.AnimatedSwitcher(
-            content=ft.Container(),
-            transition=ft.AnimatedSwitcherTransition.FADE,
-            duration=110,
-            reverse_duration=90,
-            switch_in_curve=ft.AnimationCurve.EASE_OUT_CUBIC,
-            switch_out_curve=ft.AnimationCurve.EASE_IN_CUBIC,
-            expand=True,
-        )
+        # ONEMLI: burada eskiden ft.AnimatedSwitcher (FADE) kullaniliyordu.
+        # Sorun su: refresh() UYGULAMADAKI HEMEN HEMEN HER ETKILESIMDE
+        # cagriliyor (tema degistirme, ayar kaydetme, bolum acma/kapama,
+        # kronometre bitisi, vs.) -- ve her seferinde self.body.content
+        # YENIDEN olusturuluyordu. AnimatedSwitcher her yeni content'i
+        # "degisti" sayip otomatik olarak fade animasyonu baslatiyordu; yani
+        # sadece sekme gecislerinde degil, UYGULAMANIN HER YERINDE surekli
+        # kisa bir yanip-sonme animasyonu tetikleniyordu. Bu, genel "kasma/
+        # donma" hissinin buyuk kismindan sorumluydu. Simdi sekmeler arasi
+        # yonlu kayma animasyonunu SADECE body_shift (asagida) veriyor, ve
+        # SADECE gercekten sekme degisince calisiyor -- diger tum refresh()
+        # cagrilari artik anlik/animasyonsuz, bu da uygulamayi genel olarak
+        # cok daha akici hissettiriyor.
+        self.body = ft.Container(content=ft.Container(), expand=True)
         self.milestone_queue = []
         self.note_field = ft.TextField(multiline=True, min_lines=2, max_lines=4, dense=True)
         self.selected_date = day_key()
@@ -2592,6 +2597,12 @@ class OrganizerApp:
         self.page.bgcolor = theme["bg"]
         self.page.theme_mode = ft.ThemeMode.DARK if theme["dark"] else ft.ThemeMode.LIGHT
         self.body.content = self.build_screen()
+        # Alt navigasyon cubugundaki secili ikon, sekme swipe ile (nav
+        # cubuguna dokunulmadan) degistiginde de HER ZAMAN gercek sekmeyle
+        # uyumlu olsun diye burada senkronize ediyoruz -- eskiden bu satir
+        # yoktu, bu yuzden parmakla kaydirinca icerik degisiyor ama alt
+        # sekme cubugu eski sekmede kalmis gibi gorunuyordu.
+        self.nav.selected_index = self.tab
         self.nav.bgcolor = theme["panel"]
         self.nav.indicator_color = ft.Colors.with_opacity(0.16, theme["accent"])
         for i, key in enumerate(
@@ -3143,7 +3154,12 @@ class OrganizerApp:
                 add_focus_seconds(self.page, self.today(), elapsed)
                 add_session(self.page, self.today(), elapsed, self.focus_label)
                 remember_session_label(self.page, self.focus_label)
-            self.focus_remaining = self.focus_minutes * 60
+            # ONEMLI: burada eskiden "self.focus_remaining = self.focus_minutes * 60"
+            # vardi -- yani DUR'a basinca ekran hemen basa (ör. 45:00) sifirlaniyordu.
+            # focus_remaining zaten _timer_tick tarafindan surekli guncelleniyor,
+            # oldugu gibi birakiyoruz ki "44:32'de durdurdum, 44:32'de kalsin"
+            # beklentisi karsilansin. Tekrar "Basla"ya basildiginda (asagidaki
+            # else) zaten bu kalan sureden devam ediyor.
             self.refresh()
             self.check_milestones()
         else:
