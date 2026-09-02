@@ -2107,29 +2107,44 @@ def save_int_pref(page: ft.Page, key: str, value: int):
 
 
 def load_theme_key(page: ft.Page) -> str:
+    # ONEMLI: client_storage.get() bazen HATA FIRLATMADAN sessizce None
+    # donuyor -- ozellikle uygulama daha yeni acilmisken, cihazin depolama
+    # eklentisi henuz diskten veriyi yuklemeyi bitirmemisken. Eskiden bu
+    # fonksiyon SADECE gercek bir exception oldugunda tekrar deniyordu; bu
+    # "sessiz None" durumunu YAKALAMIYORDU, yani tema hep ilk denemede
+    # (henuz hazir olmayan depolamadan) None okuyup "buz" varsayilanina
+    # donuyordu -- kullanicinin "kapatip actigimda tema sifirlaniyor"
+    # sikayetinin gercek nedeni muhtemelen buydu. Simdi gecersiz/bos sonucu
+    # da (exception olmasa bile) tekrar deneme sebebi sayiyoruz.
     val = None
-    for attempt in range(3):
+    for attempt in range(5):
         try:
             val = page.client_storage.get(THEME_KEY)
-            break
         except Exception:
             val = None
-            if attempt < 2:
-                time.sleep(0.05)
+        if val in THEMES:
+            return val
+        if attempt < 4:
+            time.sleep(0.08)
     return val if val in THEMES else "buz"
 
 
 def save_theme_key(page: ft.Page, key: str):
     # ONEMLI: hesap kodunda oldugu gibi client_storage.set bazi cihazlarda
     # sessizce basarisiz olabiliyor -- tema secimi kaybolup uygulama
-    # kapanip acilinca "buz" temasina geri donuyordu. Birkac kez deniyoruz.
-    for attempt in range(3):
+    # kapanip acilinca "buz" temasina geri donuyordu. Sadece yazmakla
+    # kalmiyoruz, HER denemeden sonra GERI OKUYUP dogruluyoruz -- set()
+    # cagrisi hata firlatmasa bile veri gercekten diske yazilmamis
+    # olabilir. Dogrulama basarisiz olursa tekrar deniyoruz.
+    for attempt in range(4):
         try:
             page.client_storage.set(THEME_KEY, key)
-            return
+            if page.client_storage.get(THEME_KEY) == key:
+                return
         except Exception:
-            if attempt < 2:
-                time.sleep(0.05)
+            pass
+        if attempt < 3:
+            time.sleep(0.08)
 
 
 def load_heat_scale(page: ft.Page) -> str:
@@ -2710,15 +2725,25 @@ class OrganizerApp:
             width = 340
         max_px = max(width - 24, 60)  # kenarlarda hafif bosluk birakiyoruz
         shift_px = max(-max_px, min(max_px, raw))
-        # asiri sik update() cagrisini onlemek icin kucuk degisimleri atla --
-        # 5px'e cikardik: cok hizli kaydirmalarda saniyede onlarca update()
-        # cagrisi cihaza gidip gelmeye calisiyor, bu da genel kasmaya
-        # katkida bulunuyordu. 5px goz ile fark edilmeyecek kadar kucuk
-        # ama cagri sayisini belirgin sekilde azaltiyor.
-        last_sent = getattr(self, "_last_shift_px", 0)
-        if abs(shift_px - last_sent) < 5 and shift_px not in (-max_px, max_px):
+        # ONEMLI -- eski piksel esigi (5px) HIZLI kaydirmalarda ISE
+        # YARAMIYORDU: parmak hizli hareket ederken art arda gelen HER olay
+        # zaten 5px'ten fazla fark yaratiyor, yani pratikte hicbir olay
+        # atlanmiyordu. drag_interval=16 (cihazdan saniyede ~60 olay) ile
+        # birlesince uygulama yine saniyede ~60 kez Python<->Flutter
+        # koprusunden gidip geliyordu -- asil kasmanin kaynagi tam da buydu,
+        # bu yuzden drag_interval eklemenin "hicbir etkisi olmadi" hissi
+        # dogruydu, cunku pratikte etkili bir sekilde hicbir sey atlanmiyordu.
+        # Simdi ZAMANA dayali gercek bir tavan koyuyoruz: update() cagrisini
+        # (piksel farkindan bagimsiz) saniyede en fazla ~45 ile siniyoruz.
+        # Bu goz icin hala akici ama cihaz<->uygulama gidis-donus sayisini
+        # ciddi sekilde azaltiyor -- kenarlarda (max_px'e ulasinca) her
+        # zaman hemen gonderiyoruz ki lastik etkisi geç kalmasin.
+        now = time.monotonic()
+        last_ts = getattr(self, "_last_shift_ts", 0.0)
+        is_edge = shift_px in (-max_px, max_px)
+        if (now - last_ts) < 0.022 and not is_edge:
             return
-        self._last_shift_px = shift_px
+        self._last_shift_ts = now
         # surukleme sirasinda animasyon KAPALI: parmakla birebir, aninda takip
         self.body_shift.animate_offset = None
         self.body_shift.offset = ft.Offset(shift_px / max(width, 1), 0)
@@ -2730,7 +2755,7 @@ class OrganizerApp:
     def on_swipe_end(self, e):
         dx = self._swipe_dx
         self._swipe_dx = 0.0
-        self._last_shift_px = 0
+        self._last_shift_ts = 0.0
         if self.body_shift is not None:
             # birakinca: yumusak bir yayla merkeze don -- bu, sekme
             # degisimiyle birlikte zaten yonlu bir kayma hissi veriyor
@@ -4950,16 +4975,15 @@ class OrganizerApp:
                 content=self.body_shift,
                 on_horizontal_drag_update=self.on_swipe_update,
                 on_horizontal_drag_end=self.on_swipe_end,
-                # ONEMLI: drag_interval olmadan (varsayilan 0) cihaz parmak
-                # hareketinin HER olayini -- saniyede muhtemelen 60'in cok
-                # uzerinde -- sunucuya gonderiyordu. Benim Python tarafindaki
-                # 5px esigim bunlarin bir kismini islemeden atlıyordu ama
-                # olayin kendisi (cihaz<->uygulama gidis-donusu) yine de
-                # gerceklesiyordu -- asil bant genisligi/kasma maliyeti
-                # buradaydi. drag_interval bunu KAYNAGINDA (cihaz tarafinda)
-                # kisitliyor; 16ms ~60fps demek, goz insan gozune hala
-                # pürüzsüz gelir ama gereksiz olay trafigini ciddi azaltir.
-                drag_interval=16,
+                # ONEMLI: drag_interval, cihazin olayi Python'a HANGI SIKLIKLA
+                # gonderdigini sinirlar (kaynakta kisitlama). on_swipe_update
+                # icindeki ZAMANA dayali tavan (~45/sn) ise Python bu olayi
+                # aldiktan SONRA gercekten bir update() gonderip gondermeyecegine
+                # karar verir (hedefte kisitlama). Ikisini birbirine yakin
+                # tutuyoruz (24ms ~ 42fps) ki cihaz bosuna -- zaten atlanacak --
+                # olay gondermesin; boylece hem gereksiz IPC trafigi hem de
+                # gereksiz update() cagrisi asgariye iner.
+                drag_interval=24,
             ),
             padding=ft.Padding.symmetric(vertical=0, horizontal=20),
             expand=True,
