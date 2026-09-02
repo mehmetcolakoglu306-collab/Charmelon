@@ -4950,6 +4950,16 @@ class OrganizerApp:
                 content=self.body_shift,
                 on_horizontal_drag_update=self.on_swipe_update,
                 on_horizontal_drag_end=self.on_swipe_end,
+                # ONEMLI: drag_interval olmadan (varsayilan 0) cihaz parmak
+                # hareketinin HER olayini -- saniyede muhtemelen 60'in cok
+                # uzerinde -- sunucuya gonderiyordu. Benim Python tarafindaki
+                # 5px esigim bunlarin bir kismini islemeden atlıyordu ama
+                # olayin kendisi (cihaz<->uygulama gidis-donusu) yine de
+                # gerceklesiyordu -- asil bant genisligi/kasma maliyeti
+                # buradaydi. drag_interval bunu KAYNAGINDA (cihaz tarafinda)
+                # kisitliyor; 16ms ~60fps demek, goz insan gozune hala
+                # pürüzsüz gelir ama gereksiz olay trafigini ciddi azaltir.
+                drag_interval=16,
             ),
             padding=ft.Padding.symmetric(vertical=0, horizontal=20),
             expand=True,
