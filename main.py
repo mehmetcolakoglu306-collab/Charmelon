@@ -2107,18 +2107,29 @@ def save_int_pref(page: ft.Page, key: str, value: int):
 
 
 def load_theme_key(page: ft.Page) -> str:
-    try:
-        val = page.client_storage.get(THEME_KEY)
-    except Exception:
-        val = None
+    val = None
+    for attempt in range(3):
+        try:
+            val = page.client_storage.get(THEME_KEY)
+            break
+        except Exception:
+            val = None
+            if attempt < 2:
+                time.sleep(0.05)
     return val if val in THEMES else "buz"
 
 
 def save_theme_key(page: ft.Page, key: str):
-    try:
-        page.client_storage.set(THEME_KEY, key)
-    except Exception:
-        pass
+    # ONEMLI: hesap kodunda oldugu gibi client_storage.set bazi cihazlarda
+    # sessizce basarisiz olabiliyor -- tema secimi kaybolup uygulama
+    # kapanip acilinca "buz" temasina geri donuyordu. Birkac kez deniyoruz.
+    for attempt in range(3):
+        try:
+            page.client_storage.set(THEME_KEY, key)
+            return
+        except Exception:
+            if attempt < 2:
+                time.sleep(0.05)
 
 
 def load_heat_scale(page: ft.Page) -> str:
@@ -2950,17 +2961,10 @@ class OrganizerApp:
                     "positive" if goal_progress["on_track"] else "accent",
                 ),
             ]
-        content += [
-            ft.Container(height=16),
-            ft.Row(
-                [
-                    primary_button(theme, self.t("focus_btn", n=25), lambda e: self.start_focus(25)),
-                    quiet_button(theme, self.t("focus_btn", n=45), lambda e: self.start_focus(45)),
-                ],
-                spacing=8,
-            ),
-            ft.Container(height=8),
-        ]
+        # ONEMLI: burada "giris sekmesi"nin (Bugun) en altinda 25 dk / 45 dk
+        # hizli-baslat butonlari vardi -- kullanici istegiyle kaldirildi,
+        # odaklanma suresi zaten Odak sekmesinden seciliyor.
+        content += [ft.Container(height=8)]
         return ft.Column(content, spacing=0, scroll=ft.ScrollMode.AUTO, expand=True)
 
     # ---------------- ODAK ------------------------------------
