@@ -42,6 +42,12 @@ FIRESTORE_BASE = (
     f"/databases/(default)/documents"
 )
 ACCOUNT_CODE_KEY = "account_code"
+# Bazi cihazlarda client_storage.get/set sessizce gecikiyor veya basarisiz
+# oluyor (Flet'in bilinen bir sorunu). Bu yuzden oturum icinde bellekte de
+# ayrica tutuyoruz: client_storage basarisiz olsa BILE kullanici "Yeni kod
+# uret"e bastiginda ekranda kodun gorunmemesi/hic bir sey olmamasi hissi
+# yasanmasin -- en azindan uygulama acikken kod dogru calissin.
+_ACCOUNT_CODE_CACHE = {"code": None}
 
 
 def get_account_code(page: ft.Page):
@@ -49,14 +55,21 @@ def get_account_code(page: ft.Page):
         code = page.client_storage.get(ACCOUNT_CODE_KEY)
     except Exception:
         code = None
-    return code if code else None
+    if code:
+        _ACCOUNT_CODE_CACHE["code"] = code
+        return code
+    return _ACCOUNT_CODE_CACHE["code"]
 
 
 def set_account_code(page: ft.Page, code):
-    try:
-        page.client_storage.set(ACCOUNT_CODE_KEY, code or "")
-    except Exception:
-        pass
+    _ACCOUNT_CODE_CACHE["code"] = code or None
+    for attempt in range(3):
+        try:
+            page.client_storage.set(ACCOUNT_CODE_KEY, code or "")
+            return
+        except Exception:
+            if attempt < 2:
+                time.sleep(0.05)
 
 
 def firestore_get_field(account_code: str, field_name: str):
@@ -2594,13 +2607,12 @@ class OrganizerApp:
         self.tab = i
         save_int_pref(self.page, LAST_TAB_KEY, i)
         self.refresh()
-        # Alt navigasyon cubugundan (veya baska programatik bir yerden)
-        # sekme degisince, Papara/benzeri uygulamalardaki gibi yeni icerik
-        # dogru yonden kayarak gelsin. Swipe ile gelen degisiklikte bu
-        # ayri animasyona GEREK YOK -- parmagin birakilisindaki "merkeze
-        # donus" zaten kendi yonlu hareketini veriyor; ikisini ust uste
-        # bindirmek titreme/kasmaya yol acar, o yuzden swipe tarafi
-        # animate_slide=False ile cagiriyor.
+        # Alt navigasyon cubugundan (veya swipe birakilisindan) sekme
+        # degisince, Papara/benzeri uygulamalardaki gibi yeni icerik dogru
+        # yonden kayarak gelsin. Swipe'ta da GARANTILI olarak bu animasyonu
+        # tetikliyoruz (animate_slide=True) -- parmak takibi (on_swipe_update)
+        # bazi cihazlarda gecikmeli/eksik calisabiliyor, o durumda bile
+        # birakinca en azindan bu net kayma animasyonu mutlaka gorulsun diye.
         if animate_slide and direction != 0 and self.body_shift is not None:
             try:
                 self.page.run_task(self._slide_in_new_tab, direction)
@@ -2617,7 +2629,11 @@ class OrganizerApp:
             self.body_shift.animate_offset = None
             self.body_shift.offset = ft.Offset(enter_from, 0)
             self.body_shift.update()
-            await asyncio.sleep(0.02)
+            # NOT: bu bekleme, "animasyonsuz sicrama" komutunun gercekten
+            # cihaza ulasip bir kare cizilmesi icin gerekli -- cok kisa
+            # olursa (ör. 20ms) iki update() ust uste binip sadece SONUNCUSU
+            # islenebiliyor, bu da kaymanin hic gorunmemesine yol aciyordu.
+            await asyncio.sleep(0.07)
             self.body_shift.animate_offset = ft.Animation(200, ft.AnimationCurve.EASE_OUT_CUBIC)
             self.body_shift.offset = ft.Offset(0, 0)
             self.body_shift.update()
@@ -2685,10 +2701,10 @@ class OrganizerApp:
         threshold = 60
         if dx <= -threshold:
             # sola kaydirma -> sonraki sekme
-            self.set_tab(min(self.tab + 1, 4), animate_slide=False)
+            self.set_tab(min(self.tab + 1, 4), animate_slide=True)
         elif dx >= threshold:
             # saga kaydirma -> onceki sekme
-            self.set_tab(max(self.tab - 1, 0), animate_slide=False)
+            self.set_tab(max(self.tab - 1, 0), animate_slide=True)
 
     def toggle_theme(self, e=None):
         self.theme_key = "kagit" if self.theme_key == "buz" else "buz"
